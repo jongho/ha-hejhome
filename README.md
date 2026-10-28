@@ -2,8 +2,8 @@
 
 [![HACS Custom](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](https://hacs.xyz/docs/faq/custom_repositories/)
 
-> **비공식 통합입니다.** 헤이홈(Hejhome) 및 GoQual과 관계가 없으며, 공식 지원을 받지 않습니다.
-> Unofficial — not affiliated with or endorsed by Hejhome / GoQual.
+> **비공식 통합입니다.** 헤이홈(Hejhome) 및 고퀄(GOQUAL)과 관계가 없으며, 공식 지원을 받지 않습니다.
+> Unofficial — not affiliated with or endorsed by Hejhome / GOQUAL.
 
 헤이홈 웹 대시보드(square.hej.so)의 비공식 API를 이용해 헤이홈 기기를 Home Assistant에 연동합니다.
 프로토콜은 ISC 라이선스의 Homebridge 플러그인 [`@chazepps/homebridge-hejhome`](https://github.com/chazepps/homebridge-hejhome)을 참고해 Python으로 옮겼습니다.
