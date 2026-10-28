@@ -1,0 +1,65 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Hejhome account",
+        "description": "Enter the e-mail address registered in the Hejhome app. A 6-digit verification code will be sent to it.",
+        "data": {
+          "email": "E-mail"
+        }
+      },
+      "verify": {
+        "title": "Verify and log in",
+        "description": "Enter the 6-digit code sent to {email} and your Hejhome password.",
+        "data": {
+          "code": "Verification code",
+          "password": "Password"
+        }
+      },
+      "family": {
+        "title": "Choose a home",
+        "data": {
+          "family_id": "Home"
+        }
+      },
+      "reauth_confirm": {
+        "title": "Re-authenticate Hejhome",
+        "description": "The Hejhome session for {email} expired. Submit to receive a new verification code."
+      }
+    },
+    "error": {
+      "invalid_email": "Use the e-mail address registered in the Hejhome app (phone numbers are not supported).",
+      "invalid_code": "The verification code was rejected.",
+      "invalid_auth": "Login failed. Check the password.",
+      "cannot_connect": "Could not reach the Hejhome servers.",
+      "no_family": "No home found in this account.",
+      "unknown": "Unexpected error, see the logs."
+    },
+    "abort": {
+      "already_configured": "This home is already configured.",
+      "reauth_successful": "Re-authentication succeeded."
+    }
+  },
+  "entity": {
+    "event": {
+      "button": {
+        "name": "Button",
+        "state_attributes": {
+          "event_type": {
+            "state": {
+              "single": "Single press",
+              "double": "Double press",
+              "long": "Long press",
+              "unknown": "Unknown"
+            }
+          }
+        }
+      }
+    },
+    "switch": {
+      "gang": {
+        "name": "Switch {index}"
+      }
+    }
+  }
+}

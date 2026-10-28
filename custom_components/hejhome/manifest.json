@@ -1,0 +1,20 @@
+{
+  "domain": "hejhome",
+  "name": "Hejhome (헤이홈)",
+  "codeowners": [
+    "@jongho"
+  ],
+  "config_flow": true,
+  "dependencies": [],
+  "documentation": "https://github.com/jongho/ha-hejhome",
+  "integration_type": "hub",
+  "iot_class": "cloud_push",
+  "issue_tracker": "https://github.com/jongho/ha-hejhome/issues",
+  "loggers": [
+    "custom_components.hejhome"
+  ],
+  "requirements": [
+    "paho-mqtt>=1.6.1"
+  ],
+  "version": "0.1.0"
+}
