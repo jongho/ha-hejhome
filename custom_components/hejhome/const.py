@@ -9,6 +9,8 @@ DOMAIN = "hejhome"
 
 CONF_FAMILY_ID = "family_id"
 CONF_SESSION = "session"
+# device id -> number of keys learned from realtime reports (kept across restarts)
+CONF_BUTTON_COUNTS = "button_counts"
 
 PLATFORMS: list[Platform] = [
     Platform.BINARY_SENSOR,
@@ -36,6 +38,8 @@ TEMP_HUMIDITY_TYPES = {"SensorTh", "SensorTh2", "SensorRefTh", "SensorRefTh2"}
 LEAK_TYPES = {"SensorWater2", "SensorWater3"}
 SMOKE_TYPES = {"SensorSmoke3", "SensorSmoke4"}
 BUTTON_TYPES = {"SmartButton"}
+# Multi-key models whose deviceType carries no key count (modelName -> keys).
+MODEL_BUTTON_COUNTS = {"KRC-T402RC": 4}
 
 MULTI_SWITCH_TYPES = {
     "Switch1", "Switch2", "Switch3", "Switch4", "Switch5", "Switch6",
@@ -93,10 +97,16 @@ def is_button(device_type: str) -> bool:
     )
 
 
-def button_count(device: dict) -> int:
-    """Number of keys: trailing digit of the type, else the highest key seen in its state."""
+def button_count(device: dict, learned: int = 0) -> int:
+    """Number of keys.
+
+    The largest of: the trailing digit of the type (SmartButton4), a known model
+    (KRC-T402RC), the highest key seen in its state, and the highest key seen in
+    earlier realtime reports (``learned``).
+    """
     match = _TRAILING_NUMBER_RE.search(str(device.get("deviceType") or ""))
     count = int(match.group(1)) if match else 1
+    count = max(count, MODEL_BUTTON_COUNTS.get(str(device.get("modelName") or ""), 1), learned)
     for key in (device.get("deviceState") or {}):
         index = button_index(str(key))
         if index:
