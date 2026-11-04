@@ -15,7 +15,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
 from . import HejhomeConfigEntry
-from .const import BATTERY_TYPES, TEMP_HUMIDITY_TYPES
+from .const import BATTERY_TYPES, TEMP_HUMIDITY_TYPES, is_button
 from .entity import HejhomeEntity
 
 
@@ -70,8 +70,16 @@ async def async_setup_entry(
         HejhomeSensor(coordinator, device_id, description)
         for device_id, device in coordinator.data.items()
         for description in DESCRIPTIONS
-        if device.get("deviceType") in description.device_types
+        if _applies(description, device)
     )
+
+
+def _applies(description: HejSensorDescription, device: dict[str, Any]) -> bool:
+    device_type = str(device.get("deviceType") or "")
+    if device_type in description.device_types:
+        return True
+    # Buttons of newer models (e.g. 4-key scene buttons) are battery powered too.
+    return description.key == "battery" and is_button(device_type)
 
 
 class HejhomeSensor(HejhomeEntity, SensorEntity):
