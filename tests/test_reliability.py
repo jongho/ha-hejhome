@@ -107,11 +107,18 @@ async def test_new_models_create_entities(hass: HomeAssistant, aioclient_mock, n
     assert _eid(hass, "sensor", "btn4_battery")
 
     coordinator = entry.runtime_data
+    bus = []
+    hass.bus.async_listen("hejhome_button", bus.append)
     coordinator.async_handle_report("btn4", {}, [{"code": "switch3_value", "value": "long_press"}])
     await hass.async_block_till_done()
     state = hass.states.get(keys[2])
     assert state.attributes["event_type"] == "long" and state.attributes["button"] == 3
     assert hass.states.get(keys[0]).attributes["event_type"] is None
+    # One bus event per report, naming the key that was pressed.
+    assert [e.data["entity_id"] for e in bus] == [keys[2]]
+    coordinator.async_handle_report("btn4", {}, [{"code": "battery_percentage", "value": 90}])
+    await hass.async_block_till_done()
+    assert [e.data["entity_id"] for e in bus] == [keys[2], keys[0]]
 
     # Unsupported devices surface their raw reports on the bus.
     raw_events = []

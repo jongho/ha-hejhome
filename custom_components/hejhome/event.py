@@ -121,10 +121,24 @@ class HejhomeButtonEvent(HejhomeEntity, EventEntity):
             )
         )
 
+    def _owns_report(self, raw: list[dict[str, Any]]) -> bool:
+        """Whether this key entity announces the report on the bus.
+
+        Exactly one entity per device does: the key that was pressed, or the
+        single / first key for reports without a known key number (battery,
+        a key above the current count while the entry reloads).
+        """
+        if self._index is None:
+            return True
+        found = [index for index, _, _ in presses(raw) if index is not None]
+        key = found[0] if found and found[0] <= self.coordinator.button_count(self.device_id) else 1
+        return self._index == key
+
     @callback
     def _handle_report(self, raw: list[dict[str, Any]]) -> None:
-        if self._index in (None, 1):
-            # One bus event per report, carrying the raw data points.
+        if self._owns_report(raw):
+            # One bus event per report, carrying the raw data points and the
+            # entity of the key that was pressed.
             self.hass.bus.async_fire(
                 EVENT_BUTTON, {"device_id": self.device_id, "entity_id": self.entity_id, "status": raw}
             )
