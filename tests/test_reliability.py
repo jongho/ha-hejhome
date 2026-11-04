@@ -69,6 +69,9 @@ def test_type_classifiers():
     assert button_count({"deviceType": "SmartButton4"}) == 4
     assert button_count({"deviceType": "SmartButton"}) == 1
     assert button_count({"deviceType": "SceneButton", "deviceState": {"switch3_value": "single_click"}}) == 3
+    # Known model without a key count in its type, and a count learned from reports.
+    assert button_count({"deviceType": "SmartButton", "modelName": "KRC-T402RC", "deviceState": {"power": ""}}) == 4
+    assert button_count({"deviceType": "SmartButton"}, learned=3) == 3
     assert [button_index(c) for c in ("switch2_value", "switch_mode4", "key_3", "battery", "switch_1")] == [
         2, 4, 3, None, None,
     ]
@@ -121,6 +124,30 @@ async def test_new_models_create_entities(hass: HomeAssistant, aioclient_mock, n
     robot = next(d for d in diag["devices"] if d["id"] == "robot")
     assert robot["supported"] is False and robot["recentReports"][0]["status"] == [{"code": "y", "value": 2}]
     assert diag["entry"]["password"] == "**REDACTED**"
+
+
+async def test_button_learns_keys_and_replaces_single_entity(
+    hass: HomeAssistant, aioclient_mock, no_realtime
+) -> None:
+    entry = await _setup(hass, aioclient_mock)
+    assert _eid(hass, "event", "btn1") is None
+    assert _eid(hass, "event", "btn1_button")
+
+    entry.runtime_data.async_handle_report("btn1", {}, [{"code": "switch4_value", "value": "single_click"}])
+    await hass.async_block_till_done()
+
+    assert entry.data["button_counts"] == {"btn1": 4}
+    assert [_eid(hass, "event", f"btn1_button_{i}") is not None for i in range(1, 5)] == [True] * 4
+    assert _eid(hass, "event", "btn1_button") is None
+
+    # The learned count survives a reload; later key-4 presses land on key 4.
+    assert await hass.config_entries.async_reload(entry.entry_id)
+    await hass.async_block_till_done()
+    assert _eid(hass, "event", "btn1_button_4")
+    entry.runtime_data.async_handle_report("btn1", {}, [{"code": "switch4_value", "value": "double_click"}])
+    await hass.async_block_till_done()
+    state = hass.states.get(_eid(hass, "event", "btn1_button_4"))
+    assert state.attributes["event_type"] == "double"
 
 
 async def test_push_does_not_postpone_poll(hass: HomeAssistant, aioclient_mock, no_realtime) -> None:

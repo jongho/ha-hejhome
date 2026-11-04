@@ -17,6 +17,7 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 
 from .api import HejAuth, HejAuthError, HejClient, HejConnectionError, HejError, HejSession
 from .const import (
+    CONF_BUTTON_COUNTS,
     CONF_FAMILY_ID,
     CONF_SESSION,
     DOMAIN,
@@ -25,6 +26,9 @@ from .const import (
     MEASUREMENT_FRESHNESS_SECONDS,
     POLL_INTERVAL_SECONDS,
     REPORT_FRESHNESS_SECONDS,
+    button_count,
+    button_index,
+    is_button,
     is_supported,
 )
 from .realtime import HejRealtime
@@ -221,6 +225,34 @@ class HejhomeCoordinator(DataUpdateCoordinator[Devices]):
         self.data = data
         self.async_update_listeners()
 
+    # ---- multi-key buttons ---------------------------------------------
+
+    def learned_button_count(self, device_id: str) -> int:
+        return int((self.config_entry.data.get(CONF_BUTTON_COUNTS) or {}).get(device_id, 0))
+
+    def button_count(self, device_id: str) -> int:
+        return button_count(self.data.get(device_id) or {}, self.learned_button_count(device_id))
+
+    @callback
+    def _learn_button_keys(self, device_id: str, raw: list[dict[str, Any]]) -> None:
+        """Remember a key number above the known count and reload to add entities.
+
+        Models like the SmartButton report no key count in their type, and their
+        REST state can be empty after a restart; one press of key 4 is proof.
+        """
+        if not is_button(str(self.data[device_id].get("deviceType") or "")):
+            return
+        seen = max((button_index(str(item.get("code"))) or 0 for item in raw), default=0)
+        if seen <= self.button_count(device_id):
+            return
+        counts = dict(self.config_entry.data.get(CONF_BUTTON_COUNTS) or {})
+        counts[device_id] = seen
+        _LOGGER.info("Hejhome button %s has at least %s keys; reloading to add them", device_id, seen)
+        self.hass.config_entries.async_update_entry(
+            self.config_entry, data={**self.config_entry.data, CONF_BUTTON_COUNTS: counts}
+        )
+        self.hass.config_entries.async_schedule_reload(self.config_entry.entry_id)
+
     # ---- realtime ------------------------------------------------------
 
     async def async_start_realtime(self) -> None:
@@ -252,6 +284,7 @@ class HejhomeCoordinator(DataUpdateCoordinator[Devices]):
         async_dispatcher_send(self.hass, signal_report(self.config_entry.entry_id, device_id), raw)
         if not self.data or device_id not in self.data:
             return
+        self._learn_button_keys(device_id, raw)
         if not is_supported(self.data[device_id]):
             # Lets users see what an unsupported model sends (Developer tools -> Events).
             self.hass.bus.async_fire(

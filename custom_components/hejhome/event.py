@@ -14,11 +14,12 @@ from typing import Any
 
 from homeassistant.components.event import EventDeviceClass, EventEntity
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
 from . import HejhomeConfigEntry
-from .const import EVENT_BUTTON, button_count, button_index, is_button
+from .const import DOMAIN, EVENT_BUTTON, button_index, is_button
 from .coordinator import signal_report
 from .entity import HejhomeEntity
 
@@ -73,12 +74,30 @@ async def async_setup_entry(
     for device_id, device in coordinator.data.items():
         if not is_button(str(device.get("deviceType") or "")):
             continue
-        count = button_count(device)
+        count = coordinator.button_count(device_id)
         if count == 1:
             entities.append(HejhomeButtonEvent(coordinator, device_id, None))
         else:
             entities.extend(HejhomeButtonEvent(coordinator, device_id, index) for index in range(1, count + 1))
+    _remove_stale(hass, entry, {entity.device_id for entity in entities}, {entity.unique_id for entity in entities})
     async_add_entities(entities)
+
+
+def _remove_stale(
+    hass: HomeAssistant, entry: HejhomeConfigEntry, device_ids: set[str], keep: set[str | None]
+) -> None:
+    """Drop key entities of the current buttons whose key layout no longer exists.
+
+    A button first set up as a single key (``<id>_button``) and later known to
+    have four keys (``<id>_button_1`` ...) would otherwise leave a dead entity.
+    Devices missing from this snapshot are left alone.
+    """
+    registry = er.async_get(hass)
+    for reg in er.async_entries_for_config_entry(registry, entry.entry_id):
+        if reg.domain != "event" or reg.platform != DOMAIN or reg.unique_id in keep:
+            continue
+        if any(reg.unique_id == f"{d}_button" or reg.unique_id.startswith(f"{d}_button_") for d in device_ids):
+            registry.async_remove(reg.entity_id)
 
 
 class HejhomeButtonEvent(HejhomeEntity, EventEntity):
