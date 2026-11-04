@@ -82,6 +82,20 @@ def test_parse_newer_thermometer_codes():
     assert patch == {"humidity": 52}
 
 
+def test_parse_sensor_th2_hundredths():
+    # Real GKZ-TH141 (SensorTh2) reports: hundredths of a degree / percent.
+    _, patch, _ = parse_report(_report("t", ("prm_temperature", 2240), ("prm_content", 5740)))
+    assert patch == {"temperature": 22.4, "humidity": 57}
+    _, patch, _ = parse_report(_report("t", ("prm_temperature", -550)))
+    assert patch == {"temperature": -5.5}
+
+
+def test_parse_drops_implausible_measurements():
+    # A wrongly scaled value must not reach the entity or override REST.
+    _, patch, _ = parse_report(_report("t", ("va_temperature", 2240), ("va_humidity", 5740)))
+    assert patch == {}
+
+
 async def test_new_models_create_entities(hass: HomeAssistant, aioclient_mock, no_realtime) -> None:
     entry = await _setup(hass, aioclient_mock)
     assert _eid(hass, "light", "bulb6")

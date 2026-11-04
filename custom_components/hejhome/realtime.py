@@ -86,24 +86,23 @@ def parse_report(payload: str | bytes) -> tuple[str, dict[str, Any], list[dict[s
                 patch["motionDetected"] = value == "pir"
                 if value == "pir":
                     patch["lastMotionAt"] = time.time()
-        elif code in ("va_temperature", "prm_temperature"):
-            num = _num(value)
-            if num is not None:
-                patch["temperature"] = round(num) / 10
-        elif code in ("va_humidity", "prm_content"):
-            num = _num(value)
-            if num is not None and 0 <= num <= 1000:
-                patch["humidity"] = round(num / 10)
-        elif code == "temp_current":
-            # Newer Tuya thermo-hygrometers: tenths of a degree, like va_temperature.
-            num = _num(value)
-            if num is not None:
-                patch["temperature"] = round(num) / 10
+        elif code in ("va_temperature", "temp_current"):
+            # Tenths of a degree (va_temperature 235 -> 23.5 °C).
+            _set_temperature(patch, value, 10)
+        elif code == "prm_temperature":
+            # SensorTh2 (GKZ-TH141) reports hundredths: 2240 -> 22.4 °C.
+            _set_temperature(patch, value, 100)
+        elif code == "va_humidity":
+            # Tenths of a percent (456 -> 46 %).
+            _set_humidity(patch, value, 10)
+        elif code == "prm_content":
+            # SensorTh2 humidity in hundredths: 5740 -> 57 %.
+            _set_humidity(patch, value, 100)
         elif code == "humidity_value":
             # Whole percent on most models, tenths on some.
             num = _num(value)
-            if num is not None and 0 <= num <= 1000:
-                patch["humidity"] = round(num / 10) if num > 100 else round(num)
+            if num is not None:
+                _set_humidity(patch, value, 10 if num > 100 else 1)
         elif code in ("battery", "battery_percentage", "va_battery"):
             num = _num(value)
             if num is not None and 0 <= num <= 100:
@@ -123,6 +122,35 @@ def parse_report(payload: str | bytes) -> tuple[str, dict[str, Any], list[dict[s
             else:
                 patch[code] = value
     return dev_id, patch, status
+
+
+# Plausible ranges for environment readings. A value outside them means the
+# scale was guessed wrong; dropping it lets the REST snapshot (whole degrees /
+# percent) stay in charge instead of an impossible realtime value.
+TEMPERATURE_RANGE = (-40.0, 100.0)
+HUMIDITY_RANGE = (0, 100)
+
+
+def _set_temperature(patch: dict[str, Any], value: Any, divisor: int) -> None:
+    num = _num(value)
+    if num is None:
+        return
+    celsius = round(num / divisor, 1)
+    if TEMPERATURE_RANGE[0] <= celsius <= TEMPERATURE_RANGE[1]:
+        patch["temperature"] = celsius
+    else:
+        _LOGGER.debug("Dropped implausible temperature %s (raw %s / %s)", celsius, value, divisor)
+
+
+def _set_humidity(patch: dict[str, Any], value: Any, divisor: int) -> None:
+    num = _num(value)
+    if num is None:
+        return
+    percent = round(num / divisor)
+    if HUMIDITY_RANGE[0] <= percent <= HUMIDITY_RANGE[1]:
+        patch["humidity"] = percent
+    else:
+        _LOGGER.debug("Dropped implausible humidity %s (raw %s / %s)", percent, value, divisor)
 
 
 def _bool(value: Any) -> bool | None:
