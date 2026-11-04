@@ -15,7 +15,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
 from . import HejhomeConfigEntry
-from .const import COLOR_LIGHT_TYPES, WHITE_LIGHT_TYPES, WHITE_MAX_KELVIN, WHITE_MIN_KELVIN
+from .const import WHITE_MAX_KELVIN, WHITE_MIN_KELVIN, is_color_light, is_white_light
 from .entity import HejhomeEntity
 
 
@@ -25,9 +25,10 @@ async def async_setup_entry(
     coordinator = entry.runtime_data
     entities: list[LightEntity] = []
     for device_id, device in coordinator.data.items():
-        if device.get("deviceType") in COLOR_LIGHT_TYPES:
+        device_type = str(device.get("deviceType") or "")
+        if is_color_light(device_type):
             entities.append(HejhomeColorLight(coordinator, device_id))
-        elif device.get("deviceType") in WHITE_LIGHT_TYPES:
+        elif is_white_light(device_type):
             entities.append(HejhomeWhiteLight(coordinator, device_id))
     async_add_entities(entities)
 

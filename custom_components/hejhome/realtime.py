@@ -94,9 +94,19 @@ def parse_report(payload: str | bytes) -> tuple[str, dict[str, Any], list[dict[s
             num = _num(value)
             if num is not None and 0 <= num <= 1000:
                 patch["humidity"] = round(num / 10)
-        elif code == "battery":
+        elif code == "temp_current":
+            # Newer Tuya thermo-hygrometers: tenths of a degree, like va_temperature.
             num = _num(value)
             if num is not None:
+                patch["temperature"] = round(num) / 10
+        elif code == "humidity_value":
+            # Whole percent on most models, tenths on some.
+            num = _num(value)
+            if num is not None and 0 <= num <= 1000:
+                patch["humidity"] = round(num / 10) if num > 100 else round(num)
+        elif code in ("battery", "battery_percentage", "va_battery"):
+            num = _num(value)
+            if num is not None and 0 <= num <= 100:
                 patch["battery"] = num
         elif code == "temp":
             patch["temperature"] = _num(value) if _num(value) is not None else value

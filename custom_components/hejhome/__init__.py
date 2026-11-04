@@ -24,6 +24,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: HejhomeConfigEntry) -> b
     coordinator = HejhomeCoordinator(hass, entry, HejAuth(websession), client)
     await coordinator.async_config_entry_first_refresh()
     await coordinator.async_load_rooms()
+    coordinator.log_unsupported()
 
     entry.runtime_data = coordinator
     await coordinator.async_start_realtime()

@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import copy
 import logging
+import time
+from collections import deque
 from datetime import timedelta
 from typing import Any
 
@@ -14,12 +16,27 @@ from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .api import HejAuth, HejAuthError, HejClient, HejConnectionError, HejError, HejSession
-from .const import CONF_FAMILY_ID, CONF_SESSION, DOMAIN, POLL_INTERVAL_SECONDS
+from .const import (
+    CONF_FAMILY_ID,
+    CONF_SESSION,
+    DOMAIN,
+    EVENT_REPORT,
+    MAX_SILENT_POLL_FAILURES,
+    MEASUREMENT_FRESHNESS_SECONDS,
+    POLL_INTERVAL_SECONDS,
+    REPORT_FRESHNESS_SECONDS,
+    is_supported,
+)
 from .realtime import HejRealtime
 
 _LOGGER = logging.getLogger(__name__)
 
 Devices = dict[str, dict[str, Any]]
+
+# Periodic environment samples: a realtime value stays authoritative for a while.
+MEASUREMENT_KEYS = frozenset({"temperature", "humidity"})
+# Fields a sleepy sensor's REST snapshot may report as null; keep the last value.
+STICKY_KEYS = frozenset({"temperature", "humidity", "battery"})
 
 
 def signal_report(entry_id: str, device_id: str) -> str:
@@ -61,6 +78,21 @@ class HejhomeCoordinator(DataUpdateCoordinator[Devices]):
         self.realtime_connected = False
         self.rooms: dict[Any, str] = {}
         self._realtime: HejRealtime | None = None
+        self._poll_failures = 0
+        # device id -> field -> (value, monotonic time received over MQTT)
+        self._reported: dict[str, dict[str, tuple[Any, float]]] = {}
+        # Last raw reports per device, for diagnostics.
+        self.recent_reports: dict[str, deque[dict[str, Any]]] = {}
+
+    def log_unsupported(self) -> None:
+        for device_id, device in (self.data or {}).items():
+            if not is_supported(device):
+                _LOGGER.warning(
+                    "Hejhome device '%s' (deviceType %s, state keys %s) is not supported yet; "
+                    "download the integration diagnostics and open an issue to add it",
+                    device.get("name"), device.get("deviceType"),
+                    sorted((device.get("deviceState") or {}).keys()),
+                )
 
     async def async_load_rooms(self) -> None:
         """Room names become suggested areas; failure here is not fatal."""
@@ -74,16 +106,68 @@ class HejhomeCoordinator(DataUpdateCoordinator[Devices]):
     # ---- polling -------------------------------------------------------
 
     async def _async_update_data(self) -> Devices:
+        try:
+            devices = await self._fetch_devices()
+        except UpdateFailed as err:
+            self._poll_failures += 1
+            # One slow or failed poll must not flag every entity unavailable;
+            # realtime reports keep arriving over MQTT in the meantime.
+            if self.data is not None and self._poll_failures < MAX_SILENT_POLL_FAILURES:
+                _LOGGER.warning(
+                    "Hejhome refresh failed (%s/%s), keeping last state: %s",
+                    self._poll_failures, MAX_SILENT_POLL_FAILURES, err,
+                )
+                return self.data
+            raise
+        self._poll_failures = 0
+        fresh = {str(d["id"]): d for d in devices if isinstance(d, dict) and d.get("id")}
+        return {device_id: self._merge_snapshot(device_id, device) for device_id, device in fresh.items()}
+
+    async def _fetch_devices(self) -> list[dict[str, Any]]:
         if self.client.session.expired:
             await self._relogin()
         try:
-            devices = await self.client.get_devices(self.family_id)
+            return await self.client.get_devices(self.family_id)
         except HejAuthError:
             await self._relogin()
-            devices = await self._fetch_or_fail()
+            return await self._fetch_or_fail()
         except (HejConnectionError, HejError) as err:
             raise UpdateFailed(str(err)) from err
-        return {str(d["id"]): d for d in devices if isinstance(d, dict) and d.get("id")}
+
+    def _merge_snapshot(self, device_id: str, device: dict[str, Any]) -> dict[str, Any]:
+        """Combine a REST snapshot with what is already known about the device.
+
+        The snapshot can lag behind realtime reports and battery sensors may come
+        back with null measurements or ``online: false`` while asleep.
+        """
+        previous = (self.data or {}).get(device_id) or {}
+        prev_state = previous.get("deviceState") or {}
+        rest_state = device.get("deviceState") or {}
+        state = {**prev_state, **rest_state}
+        for key in STICKY_KEYS:
+            if rest_state.get(key) is None and prev_state.get(key) is not None:
+                state[key] = prev_state[key]
+
+        now = time.monotonic()
+        reported = self._reported.get(device_id, {})
+        latest = 0.0
+        for key, (value, at) in reported.items():
+            age = now - at
+            latest = max(latest, at)
+            limit = MEASUREMENT_FRESHNESS_SECONDS if key in MEASUREMENT_KEYS else REPORT_FRESHNESS_SECONDS
+            if age <= limit:
+                state[key] = value
+        merged = {**device, "deviceState": state}
+        # Battery sensors sleep between samples and the cloud may list them as
+        # offline; one that reported over MQTT recently is evidently alive.
+        if (
+            merged.get("online") is False
+            and "battery" in state
+            and reported
+            and now - latest <= MEASUREMENT_FRESHNESS_SECONDS
+        ):
+            merged["online"] = True
+        return merged
 
     async def _fetch_or_fail(self) -> list[dict[str, Any]]:
         try:
@@ -125,7 +209,17 @@ class HejhomeCoordinator(DataUpdateCoordinator[Devices]):
             raise HomeAssistantError(f"Hejhome control failed: {err}") from err
         # Optimistic update; the MQTT echo will confirm or correct it.
         if self.data and device_id in self.data:
-            self.async_set_updated_data({**self.data, device_id: merge_state(self.data[device_id], requirements)})
+            self._push({**self.data, device_id: merge_state(self.data[device_id], requirements)})
+
+    @callback
+    def _push(self, data: Devices) -> None:
+        """Publish pushed state without postponing the next REST poll.
+
+        ``async_set_updated_data`` would reschedule the poll on every call, so a
+        house with chatty devices would never poll at all.
+        """
+        self.data = data
+        self.async_update_listeners()
 
     # ---- realtime ------------------------------------------------------
 
@@ -152,9 +246,29 @@ class HejhomeCoordinator(DataUpdateCoordinator[Devices]):
 
     @callback
     def async_handle_report(self, device_id: str, patch: dict[str, Any], raw: list[dict[str, Any]]) -> None:
+        self.recent_reports.setdefault(device_id, deque(maxlen=10)).append(
+            {"at": time.time(), "status": raw}
+        )
         async_dispatcher_send(self.hass, signal_report(self.config_entry.entry_id, device_id), raw)
         if not self.data or device_id not in self.data:
             return
+        if not is_supported(self.data[device_id]):
+            # Lets users see what an unsupported model sends (Developer tools -> Events).
+            self.hass.bus.async_fire(
+                EVENT_REPORT,
+                {
+                    "device_id": device_id,
+                    "name": self.data[device_id].get("name"),
+                    "device_type": self.data[device_id].get("deviceType"),
+                    "status": raw,
+                },
+            )
+        now = time.monotonic()
+        fields = self._reported.setdefault(device_id, {})
+        merged = merge_state({"deviceState": {}}, patch)["deviceState"]
+        for key, value in merged.items():
+            if value is not None:
+                fields[key] = (value, now)
         device = merge_state(self.data[device_id], patch)
         device["online"] = True
-        self.async_set_updated_data({**self.data, device_id: device})
+        self._push({**self.data, device_id: device})

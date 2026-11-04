@@ -18,9 +18,9 @@
 |---|---|
 | `SensorMo`, `SensorRadar` | 모션 binary_sensor, 배터리 |
 | `SensorTh`, `SensorTh2`, `SensorRefTh*` | 온도·습도 sensor, 배터리 |
-| `LightRgbw*`, `LightRgb*`, `LedStrip*` | light (HS 색상 + 화이트 모드) |
+| `LightRgbw*`, `LightRgb*`, `LedStrip*` (이름에 Rgb가 들어간 새 조명 모델 포함) | light (HS 색상 + 화이트 모드) |
 | `LightWw*` | light (밝기 + 색온도 3000–6500K) |
-| `SmartButton` | event (single / double / long / unknown), 배터리 |
+| `SmartButton`, 다구 버튼(`*Button4` 등) | 버튼별 event (single / double / long / unknown), 배터리 |
 | `SensorDo` | 문 열림 binary_sensor |
 | `SensorWater2/3`, `SensorSmoke3/4` | 누수·연기 binary_sensor |
 | `Switch*`, `ZigbeeSwitch*`, 릴레이, 플러그, 멀티탭 | switch (구별) |
@@ -55,6 +55,23 @@
 
 처음 설정할 때는 **개발자 도구 → 이벤트**에서 `hejhome_button`을 구독한 뒤 버튼을 눌러 보세요.
 실제 리포트(`status`)가 그대로 보이므로, 그 값을 기준으로 자동화를 만들거나 `event.py`의 `classify()`를 보정하면 됩니다.
+
+버튼이 여러 개인 모델(예: 4구 버튼)은 deviceType 끝의 숫자(`SmartButton4` 등)로 버튼 수를 판단해
+버튼마다 event 엔티티(`버튼 1` ~ `버튼 4`)를 만듭니다. 몇 번 버튼인지는 `switch1_value`, `switch_mode2`,
+`key_3` 같은 Tuya 코드에서 읽고, 번호가 없는 입력은 `버튼 1`로 들어갑니다. 이벤트의 `button` 속성에 번호가 남습니다.
+
+## 인식되지 않는 기기
+
+지원 목록에 없는 기기는 HA 로그에 `deviceType`과 함께 경고가 남고, 실시간 리포트가
+`hejhome_report` 이벤트로 발생합니다(**개발자 도구 → 이벤트**에서 구독).
+**설정 → 기기 및 서비스 → Hejhome → ⋮ → 진단 다운로드**를 하면 모든 기기의 `deviceType`, 상태 값,
+최근 실시간 리포트 10개가 담긴 파일이 나옵니다(이메일·비밀번호·토큰은 가려집니다). 이 파일을 이슈에 첨부해 주시면 지원을 추가할 수 있습니다.
+
+## 상태 갱신 방식
+
+- 실시간(MQTT) 리포트가 우선입니다. 5분마다 하는 REST 조회 결과가 더 오래된 값이어도, 90분 안에 받은 온도·습도는 덮어쓰지 않습니다.
+- 배터리 센서가 잠들어 REST가 온도를 `null`로 주거나 `online: false`로 표시해도 마지막 값을 유지합니다.
+- REST 조회가 일시적으로 실패해도 2번까지는 마지막 상태를 유지하고, 3번 연속 실패하면 엔티티를 사용 불가로 표시합니다.
 
 ## 세션 만료
 
